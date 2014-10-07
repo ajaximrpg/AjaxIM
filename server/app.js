@@ -45,8 +45,10 @@ io.on('connection', function(socket){
             });
         } else {
             hub.find(event.from, function(from) {
-                from.socketio = socket;
-                from.dispatch(hub, event);
+                if(from) {
+                    from.socketio = socket;
+                    from.dispatch(hub, event);
+                }
             });
         }
     });

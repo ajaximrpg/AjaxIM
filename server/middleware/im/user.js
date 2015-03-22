@@ -2,14 +2,13 @@ var events = require('events'),
     packages = require('../../libs/packages'),
     o_ = require('../../libs/utils');
 
-var User = module.exports = function(req, data) {
-    this.req = req;
-    this.id = req.sessionID;
+var User = module.exports = function(store, data, friends) {
+    this.store = store;
     this.connection = null;
     this.listeners = [];
     this.message_queue = [];
-    this.convos = {};
     this._data = data;
+    this.friends = friends;
 
     this.events = new events.EventEmitter();
     this._status = packages.STATUSES[0];
@@ -102,7 +101,6 @@ User.prototype._send = function(type, event, res) {
 };
 
 User.prototype.data = function(key, def) {
-    if(key == 'id') return this.id;
     return this._data[key] || this['_' + key] ||
            (typeof this[key] != 'function' && this[key]) ||
            def || false;
@@ -112,24 +110,49 @@ User.prototype.touch = function() {
     this.lastAccess = +new Date;
 };
 
-User.prototype.status = function(res, event) {
-    if(!event)
+User.prototype.message = function(event) {
+   var self = this;
+   try {
+       self.store.find('username', event.to, function(to) {
+           if(to) {
+               to.send(event);
+               event.reply({sent: true});
+           } else {
+               event.reply({sent: false, e: 'not online'});
+           }
+       });
+   } catch(e) {
+       event.reply({sent: false, e: e.description});
+   }
+};
+
+User.prototype.status = function(event) {
+    if (!event) {
         return this._status;
-    
+    }
+
     this._status = event.status;
     this._status_message = event.message;
     this.events.emit('status', event.status, event.message);
-    event._status = {sent: true};
-    if (res) {
-       res.jsonp(event);
+    if (event.reply) {
+        event.reply({sent: true});
     }
 };
 
-User.prototype.dispatch = function(hub, event) {
+User.prototype.signOff = function(event) {
+    event.status = 'offline';
+    this.store.events.emit('update', event);
+    event.reply({sent: true});
+};
+
+User.prototype.dispatch = function(event) {
     if (event.type == 'message') {
-        hub.find(event.to, function(to) {
-            hub.message(null, to, event);
-        });
+        this.message(event);
+    } else if (event.type == 'status') {
+        this.status(event);
+    } else if (event.type == 'signoff') {
+        this.signOff(event);
+    } else {
+        event.reply({sent: false, e: 'invalid event type'});
     }
 };
-

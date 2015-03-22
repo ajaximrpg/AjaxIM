@@ -1,83 +1,80 @@
 var url = require('url'),
     Hub = require('./im/hub'),
+    packages = require('../libs/packages'),
     o_ = require('../libs/utils');
 
 module.exports = function setupHub(options) {
     options = options || {};
 
-    store = new Hub(options);
+    var store = new Hub(options);
 
-    return {hub: store, session: function session(req, res, next) {
+    return {store: store, session: function session(req, res, next) {
         req.sessionStore = store;
 
-        if(!req.cookies) {
-            next(new Error('session requires cookieParser to work properly'));
-            return;
-        }
+        // create the event object
+        req.event = o_.extend({}, req.query, req.body, req.params);
+        o_.deletekey(req.event, 'callback');
+        o_.deletekey(req.event, '_');
 
-        // move "fake" cookies from query or body (for JSONP)
-        if (!(options.authentication.cookie in req.cookies)) {
-           if (req.param(options.authentication.cookie)) {
-              req.cookies[options.authentication.cookie] = req.param(options.authentication.cookie);
-           }
-        }
+        req.event.reply = function(status) {
+            if (status) {
+                this._status = status;
+            }
+            delete this.reply;
+            res.jsonp(this);
+        };
 
-        // move "fake" cookies from query or body (for JSONP)
-        if (!('callback' in req.cookies)) {
-           if (req.param('callback')) {
-              req.cookies['callback'] = req.param('callback');
-           }
-        }
+        var unauthenticated = function() {
+            req.event.reply({sent: false, e: 'unauthenticated'});
+        };
 
-        req.sessionID = req.cookies[options.authentication.cookie];
-        req.jsonpCallback = req.cookies.callback;
+        // set event handlers to unauthenticated by default
+        res.message = res.typing = res.status = res.signOff = unauthenticated;
 
-        if(url.parse(req.url).pathname.substring(0, 5) !== '/app/') {
-            next();
-            return;
-        }
-
-        if(req.sessionID) {
-            store.get(req, function(err, sess) {
-                if(err) {
-                    next(err);
+        if(url.parse(req.url).pathname.substring(0, 5) === '/app/') {
+            store.get(req.event, function(event, user) {
+                if(!user) {
+                    next();
                     return;
                 }
 
-                if(!sess) {
-                    next(new Error(JSON.stringify({
-                                        type: 'error',
-                                        error: 'not authenticated'})));
-                    return;
-                }
-
-                sess.touch();
+                user.touch();
                 if(url.parse(req.url).pathname === '/app/listen') {
                     req.connection.setTimeout(5 * 60 * 1000);
-                    sess.listener(res);
-                    store.set(req.sessionID, sess);
+                    user.listener(res);
+                    store.set(user.data('username'), user);
 
-                    if(msg = sess.message_queue.shift())
-                        sess._send.apply(sess, msg);
+                    if(msg = user.message_queue.shift()) {
+                        user._send.apply(user, msg);
+                    }
                 } else {
-                    req.event = o_.extend({}, req.query, req.body, req.params);
-                    o_.deletekey(req.event, 'callback');
-                    o_.deletekey(req.event, 'sessionid');
-                    o_.deletekey(req.event, '_');
-                    req.event.from = sess.data('username');
+                    req.event.from = user.data('username');
                 }
 
-                req.session = sess;
-                res.session = sess;
-                res.find = store.find.bind(store);
-                res.message = function(to, event) {
-                    store.message(res, to, event);
+                res.message = function() {
+                    user.message(req.event);
                 };
-                res.status = function(event) {
-                    req.session.status(res, event);
+                res.typing = function() {
+                    if(~packages.TYPING_STATES.indexOf('typing' + req.event.state)) {
+                        store.find('username', req.event.to, function(to) {
+                            if(to) {
+                                req.event.status = 'typing' + req.event.state;
+                                user.message(req.event);
+                            } else {
+                                // Typing updates do not receive confirmations,
+                                // as they are not important enough.
+                                req.event.reply({sent: true});
+                            }
+                        });
+                    } else {
+                        req.event.reply({sent: false, e: 'invalid state'});
+                    }
                 };
-                res.signOff = function(event) {
-                    store.signOff(req.sessionID, res, event);
+                res.status = function() {
+                    user.status(req.event);
+                };
+                res.signOff = function() {
+                    user.signOff(req.event);
                 };
 
                 if(url.parse(req.url).pathname !== '/app/listen') {
@@ -85,9 +82,7 @@ module.exports = function setupHub(options) {
                 }
             });
         } else {
-            next(new Error(JSON.stringify({
-                                        type: 'error',
-                                        error: 'not authenticated'})));
+            next();
         }
     }};
 };

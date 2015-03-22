@@ -54,29 +54,35 @@ AjaxIM = function(options, actions) {
             signoff: this.settings.pollServer + '/app/signoff'
         }, actions);
 
+        if (!store.get('sessionid')) {
+            store.set('sessionid', AjaxIM.uid(40));
+        }
+
         // If Socket.IO is available, create a socket
         self.socket = null;
         $.getScript(this.settings.pollServer+'/socket.io/socket.io.js', function(){
             self.socket = io(self.settings.pollServer);
             self.socket.on('client', function(event) {
-               event = $.extend(true, {}, event);
-               self.dispatchEvent(event);
+                event = $.extend(true, {}, event);
+                self.dispatchEvent(event);
             });
-            var event = {type: 'hello', from: this.username, sessionID: cookies.get('sessionid')};
-            self.sendEvent(event);
+            var event = {type: 'hello', from: store.get('user')};
+            self.sendEvent(event, function() {}, function() {});
         });
 
         // We load the theme dynamically based on the passed
         // settings. If the theme is set to false, we assume
         // that the user is going to load it himself.
         this.themeLoaded = false;
-        if(this.settings.theme) {
-            if(typeof document.createStyleSheet == 'function')
+        if (this.settings.theme) {
+            if(typeof document.createStyleSheet == 'function') {
                 document.createStyleSheet(this.settings.theme + '/theme.css');
-            else
+            } else {
                 $('body').append('<link rel="stylesheet" href="' +
                     this.settings.theme + '/theme.css" />');
-            $('<div>').appendTo('body').load(this.settings.theme + '/theme.html #imjs-bar, .imjs-tooltip',
+            }
+            $('<div>').appendTo('body').load(this.settings.theme +
+                    '/theme.html #imjs-bar, .imjs-tooltip',
                 function() {
                     self.themeLoaded = true;
                     self.setup();
@@ -111,7 +117,6 @@ AjaxIM = function(options, actions) {
                     var obj = $(this);
                     self.send(obj.parents('.imjs-chatbox').data('username'), obj.val());
                 }
-
                 var obj = $(this);
                 obj.val('');
                 obj.height(obj.data('height'));
@@ -276,11 +281,11 @@ AjaxIM = function(options, actions) {
         });
 
         // Set up event handling
-        this.onEvent('hello', this.onHello);
-        this.onEvent('message', this.onMessage);
-        this.onEvent('status', this.onStatus);
-        this.onEvent('notice', this.onNotice);
-        this.onEvent('goodbye', this.onGoodbye);
+        $(this).on('hello', AjaxIM.onObj(this, this.onHello));
+        $(this).on('message', AjaxIM.onObj(this, this.onMessage));
+        $(this).on('status', AjaxIM.onObj(this, this.onStatus));
+        $(this).on('notice', AjaxIM.onObj(this, this.onNotice));
+        $(this).on('goodbye', AjaxIM.onObj(this, this.onGoodbye));
     } else {
         return AjaxIM.init(options);
     }
@@ -367,7 +372,7 @@ $.extend(AjaxIM.prototype, {
             var msglog = this.chats[activeTab].find('.imjs-msglog');
             msglog[0].scrollTop = msglog[0].scrollHeight;
         }
-        
+
         // Set username in Friends list
         var header = $('#imjs-friends-panel .imjs-header');
         header.html(header.html().replace('{username}', this.username));
@@ -402,17 +407,18 @@ $.extend(AjaxIM.prototype, {
         if(this.offline) return;
 
         var self = this;
-        AjaxIM.get(
+        self.request(
             this.actions.listen,
-            {},
-            function(response) {
-                if($.isArray(response)) {
-                    $.each(response, function(key, value) {
-                        self._parseMessage(value);
+            'GET',
+            {type: 'hello', from: store.get('user'), sessionid: store.get('sessionid')},
+            function(event) {
+                if($.isArray(event)) {
+                    $.each(event, function(key, event) {
+                        $(self).trigger(event.type, event);
                     });
                 }
-                else if($.isPlainObject(response)) {
-                    self._parseMessage(response);
+                else if($.isPlainObject(event)) {
+                    $(self).trigger(event.type, event);
                 }
 
                 if (!self.socket) {
@@ -431,15 +437,8 @@ $.extend(AjaxIM.prototype, {
                 if (!self.socket) {
                     setTimeout(function() { self.listen(); }, self._reconnectIn);
                 }
-            },
-            this.actions.noop
+            }
         );
-    },
-
-    // === //private// {{{AjaxIM.}}}**{{{_parseMessages(messages)}}}** ===
-    //
-    _parseMessage: function(message) {
-        this.triggerEvent(message);
     },
 
     onHello: function(message) {
@@ -473,7 +472,7 @@ $.extend(AjaxIM.prototype, {
     },
 
     onMessage: function(event) {
-         this.incoming(event.from, event.body);
+        this.incoming(event.from, event.body);
     },
 
     onStatus: function(event) {
@@ -654,7 +653,7 @@ $.extend(AjaxIM.prototype, {
                 this.notification(tab);
             }
 
-            setTimeout(function() { self._scrollers() }, 0);
+            setTimeout(function() { self._scrollers(); }, 0);
         }
 
         return chatbox;
@@ -911,7 +910,7 @@ $.extend(AjaxIM.prototype, {
         if($('#imjs-friends').hasClass('imjs-selected'))
             this.activateTab($('#imjs-friends'));
     },
-    
+
     _showReconnect: function() {
         $('#imjs-reconnect').show();
     },
@@ -971,6 +970,10 @@ $.extend(AjaxIM.prototype, {
         });
     },
 
+    signOff: function() {
+        this.status('offline', '');
+    },
+
     // === {{{AjaxIM.}}}**{{{status(s, message)}}}** ===
     //
     // Sets the user's status and status message. It is possible to not
@@ -1003,13 +1006,10 @@ $.extend(AjaxIM.prototype, {
             self.offline = true;
             $('.imjs-input').attr('disabled', true);
 
-            AjaxIM.post(
-                this.actions.signoff,
-                {},
-                function(result) {
-                    if(result.type == 'success')
-                        $(self).trigger('changeStatusSuccessful',
-                                        [value, null]);
+            var event = {type: 'signoff', message: message};
+            this.sendEvent(event, function(result) {
+                if(result.type == 'success')
+                    $(self).trigger('changeStatusSuccessful', [value, null]);
                 },
                 function(error) {
                     $(self).trigger('changeStatusFailed',
@@ -1307,8 +1307,8 @@ $.extend(AjaxIM.prototype, {
 
             var tab_pos = tab.position();
             if(tab_pos.top >= $('#imjs-bar').height() ||
-               tab_pos.left < 0 ||
-               tab_pos.right > $(document).width()) {
+                    tab_pos.left < 0 ||
+                    tab_pos.right > $(document).width()) {
                 $('.imjs-scroll').css('display', '');
                 tab.css('display', 'none');
                 needScrollers = true;
@@ -1337,14 +1337,14 @@ $.extend(AjaxIM.prototype, {
             .nextAll('#imjs-bar li.imjs-tab:hidden')
             .not('.imjs-default')
             .filter(function() {
-                return $(this).data('state') != 'closed'
+                return $(this).data('state') != 'closed';
             }).length;
 
         var hiddenLeft = $('#imjs-bar li.imjs-tab:visible').eq(0)
             .prevAll('#imjs-bar li.imjs-tab:hidden')
             .not('.imjs-default')
             .filter(function() {
-                return $(this).data('state') != 'closed'
+                return $(this).data('state') != 'closed';
             }).length;
 
         $('#imjs-scroll-left').html(hiddenLeft);
@@ -1361,6 +1361,7 @@ $.extend(AjaxIM.prototype, {
     },
 
     sendEvent: function(event, successFunc, failureFunc) {
+        event.sessionid = store.get('sessionid');
         event.id = this.eventId++;
         var evt = $.extend({}, event);
         evt['_status'] = {
@@ -1387,7 +1388,7 @@ $.extend(AjaxIM.prototype, {
                    break;
             }
 
-            AjaxIM.post(url, event,
+            self.request(url, 'POST', event,
                 function(result) {
                     if (result) {
                         for (var e=0; e < result.length; ++e) {
@@ -1407,43 +1408,106 @@ $.extend(AjaxIM.prototype, {
     },
 
     dispatchEvent: function(event) {
-       if (event.id && this.unconfirmedEvents[event.id]) {
-           event['_status'] = $.extend({}, this.unconfirmedEvents[event.id]['_status'], event['_status']);
-           delete this.unconfirmedEvents[event.id];
-           if (event['_status']['sent']) {
-              event['_status']['successFunc'](event);
-           } else {
-              event['_status']['failureFunc'](event);
-           }
-       } else {
-           this.triggerEvent(event);
-       }
-    },
-    
-    // poor man's Backbone.js Events
-    eventHandlers: {},
-
-    /**
-     * Add a callback to listen for an event type.
-     */
-    onEvent: function(eventType, callback) {
-        if (!this.eventHandlers[eventType]) {
-            this.eventHandlers[eventType] = [];
-        }
-        this.eventHandlers[eventType].push(callback);
-    },
-
-    /**
-     * Trigger an event on all interested callbacks.
-     */
-    triggerEvent: function(event) {
-        if (this.eventHandlers[event.type]) {
-            for (var e=0; e < this.eventHandlers[event.type].length; ++e) {
-                this.eventHandlers[event.type][e].call(this, event);
+        if (event.id && this.unconfirmedEvents[event.id]) {
+            event['_status'] = $.extend({}, this.unconfirmedEvents[event.id]['_status'], event['_status']);
+            delete this.unconfirmedEvents[event.id];
+            if (event['_status']['sent']) {
+                event['_status']['successFunc'](event);
+            } else {
+                event['_status']['failureFunc'](event);
             }
+        } else {
+            $(this).trigger(event.type, event);
         }
+    },
+
+    // === {{{AjaxIM.}}}**{{{request(url, data, successFunc, failureFunc)}}}** ===
+    //
+    // Wrapper around {{{$.jsonp}}}, the JSON-P library for jQuery, and {{{$.ajax}}},
+    // jQuery's ajax library. Allows either function to be called, automatically,
+    // depending on the request's URL array (see {{{AjaxIM.actions}}}).
+    //
+    // ==== Parameters ====
+    // {{{url}}} is the URL of the request.
+    // {{{data}}} are any arguments that go along with the request.
+    // {{{success}}} is a callback function called when a request has completed
+    // without issue.
+    // {{{_ignore_}}} is simply to provide compatability with {{{$.post}}}.
+    // {{{failure}}} is a callback function called when a request hasn't not
+    // completed successfully.
+    request: function(url, type, data, successFunc, failureFunc, noopurl) {
+        var self = this;
+        var errorTypes = ['timeout', 'error', 'notmodified', 'parseerror'];
+        if(typeof failureFunc != 'function')
+            failureFunc = function(){};
+
+        var jsonp = (url.substring(0, 1) !== '/');
+        var success = false;
+        $.ajax({
+            url: url,
+            data: data,
+            dataType: jsonp? 'jsonp': 'json',
+            type: type,
+            cache: false,
+            timeout: 299000
+        }).done(function(data) {
+           success = true;
+           _dbg(JSON.stringify(data));
+           successFunc(data);
+        }).fail(function(jqXHR, textStatus) {
+           _dbg(textStatus);
+           failureFunc(textStatus);
+        });
+
+        if (jsonp) {
+            setTimeout(function() {
+                var failfn = function() {
+                    if (!success) {
+                        var textStatus = 'error';
+                        _dbg(textStatus);
+                        failureFunc(textStatus);
+                    }
+                };
+                var noopfn = function() {
+                    var noopdone = false;
+                    var event = {type: 'noop', from: store.get('user'), sessionid: store.get('sessionid')};
+                    $.ajax({
+                        url: self.actions.noop,
+                        data: event,
+                        dataType: 'jsonp',
+                        type: type,
+                        cache: false,
+                        timeout: 299000
+                    }).done(function(data) {
+                        noopdone = true;
+                        if (!success) {
+                            setTimeout(noopfn, 3000);
+                        }
+                    }).fail(function(jqXHR, textStatus) {
+                        // since JSONP, never called
+                    });
+                    setTimeout(function() {
+                        if (!noopdone) {
+                            failfn();
+                        }
+                    }, 3000);
+                };
+                noopfn();
+            }, 3000);
+        }
+
+        // This prevents Firefox from spinning indefinitely
+        // while it waits for a response.
+        /*
+        if(url == 'jsonp' && $.browser.mozilla) {
+            $.jsonp({
+                'url': 'about:',
+                timeout: 0
+            });
+        }
+        */
     }
-})
+});
 
 // == Static functions and variables ==
 //
@@ -1472,106 +1536,6 @@ AjaxIM.init = function(options, actions) {
     return AjaxIM.client;
 };
 
-
-// === {{{AjaxIM.}}}**{{{request(url, data, successFunc, failureFunc)}}}** ===
-//
-// Wrapper around {{{$.jsonp}}}, the JSON-P library for jQuery, and {{{$.ajax}}},
-// jQuery's ajax library. Allows either function to be called, automatically,
-// depending on the request's URL array (see {{{AjaxIM.actions}}}).
-//
-// ==== Parameters ====
-// {{{url}}} is the URL of the request.
-// {{{data}}} are any arguments that go along with the request.
-// {{{success}}} is a callback function called when a request has completed
-// without issue.
-// {{{_ignore_}}} is simply to provide compatability with {{{$.post}}}.
-// {{{failure}}} is a callback function called when a request hasn't not
-// completed successfully.
-AjaxIM.post = function(url, data, successFunc, failureFunc, urlnoop) {
-    AjaxIM.request(url, 'POST', data, successFunc, failureFunc, urlnoop);
-};
-
-AjaxIM.get = function(url, data, successFunc, failureFunc, urlnoop) {
-    AjaxIM.request(url, 'GET', data, successFunc, failureFunc, urlnoop);
-};
-
-AjaxIM.request = function(url, type, data, successFunc, failureFunc, noopurl) {
-    var errorTypes = ['timeout', 'error', 'notmodified', 'parseerror'];
-    if(typeof failureFunc != 'function')
-        failureFunc = function(){};
-
-    var jsonp = (url.substring(0, 1) !== '/');
-    var success = false;
-    data['sessionid'] = cookies.get('sessionid');
-    $.ajax({
-        url: url,
-        data: data,
-        dataType: jsonp? 'jsonp': 'json',
-        type: type,
-        cache: false,
-        timeout: 299000
-    }).done(function(data) {
-       success = true;
-       _dbg(JSON.stringify(data));
-       successFunc(data);
-    }).fail(function(jqXHR, textStatus) {
-       _dbg(textStatus);
-       failureFunc(textStatus);
-    });
-
-    if (jsonp) {
-        setTimeout(function() {
-            var failfn = function() {
-                if (!success) {
-                    var textStatus = 'error';
-                    _dbg(textStatus);
-                    failureFunc(textStatus);
-                }
-            };
-            if (noopurl) {
-                var noopfn = function() {
-                    var noopdone = false;
-                    var event = {type: 'noop'};
-                    $.ajax({
-                        url: noopurl,
-                        data: event,
-                        dataType: 'jsonp',
-                        type: type,
-                        cache: false,
-                        timeout: 299000
-                    }).done(function(data) {
-                        noopdone = true;
-                        if (!success) {
-                           setTimeout(noopfn, 3000);
-                        }
-                    }).fail(function(jqXHR, textStatus) {
-                        // since JSONP, never called
-                    });
-                    setTimeout(function() {
-                        if (!noopdone) {
-                            failfn();
-                        }
-                    }, 3000);
-                };
-                noopfn();
-            } else {
-                failfn();
-            }
-        }, 3000);
-    }
-
-    // This prevents Firefox from spinning indefinitely
-    // while it waits for a response.
-    /*
-    if(url == 'jsonp' && $.browser.mozilla) {
-        $.jsonp({
-            'url': 'about:',
-            timeout: 0
-        });
-    }
-    */
-};
-
 // === {{{AjaxIM.}}}**{{{incoming(data)}}}** ===
 //
 // Never call this directly. It is used as a connecting function between
@@ -1580,15 +1544,27 @@ AjaxIM.request = function(url, type, data, successFunc, failureFunc, noopurl) {
 // //Note:// There are two {{{AjaxIM.incoming()}}} functions. This one is a
 // static function called outside of the initialized AjaxIM object; the other
 // is only called within the initalized AjaxIM object.
-AjaxIM.incoming = function(data) {
+AjaxIM.incoming = function(event) {
     if(!AjaxIM.client)
         return false;
 
-    if(data.length)
-        AjaxIM.client._parseMessages(data);
+    if(event.length)
+        $(AjaxIM.client).trigger(event.type, event);
 };
 
-AjaxIM.eventID = 1;
+AjaxIM.uid = function(n){
+    var chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', nn='';
+    for(var c=0; c < n; c++){
+        nn += chars.substr(0|Math.random() * chars.length, 1);
+    }
+    return nn;
+};
+
+AjaxIM.onObj = function(obj, func) {
+    return function(evt, event) {
+        $.proxy(func, obj)(event);
+    };
+};
 
 // === {{{AjaxIM.}}}**{{{l10n}}}** ===
 //
@@ -1620,19 +1596,11 @@ AjaxIM.l10n = {
     notConnected: 'You are currently not connected or the server is not available. ' +
                   'Please ensure that you are signed in and try again.',
     notConnectedTip: 'You are currently not connected.',
-    
+
     defaultAway: 'I\'m away.'
 };
 
 AjaxIM.debug = true;
 function _dbg(msg) {
     if(AjaxIM.debug && window.console) console.log(msg);
-}
-
-function uid(n){
-   var chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', nn='';
-   for(var c=0; c < n; c++){
-      nn += chars.substr(0|Math.random() * chars.length, 1);
-   }
-   return nn;
 }

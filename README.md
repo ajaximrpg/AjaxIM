@@ -10,6 +10,7 @@ community experience.
 
 * Instant communication between connected users
 * Robust backend server built on [Node.js](http://nodejs.org)
+* Support for [Socket.IO](http://socket.io), JSON and JSONP
 * Can be integrated with virtually any existing website
 * Seamless authentication
 * Works across an entire website, unobtrusively
@@ -20,45 +21,34 @@ community experience.
 ## Installation
 
 Install `Node.js`:
-    wget http://nodejs.org/dist/v0.8.9/node-v0.8.9-linux-x86.tar.gz
-    tar xzf node-v0.8.9-linux-x86.tar.gz
-    cd node-v0.8.9
+
+    wget http://nodejs.org/dist/v0.10.32/node-v0.10.32-linux-x86.tar.gz
+    tar xzf node-v0.10.32-linux-x86.tar.gz
+    cd node-v0.10.32-linux-x86
     ./configure
     make
     make install
 
-Install Node Package Manager (`npm`):
-    See instructions at http://github.com/isaacs/npm.
+Install Ajax IM:
 
-Install `Express.js`, `Connect` and `Cookie`:
-    npm install express
-    npm install connect
-    npm install cookie
-
-Compile the daemon add-on if you plan on letting the server daemonize itself:
-    cd server/libs/daemon
-    node-waf configure build
-    cp build/default/daemon.node .
-    rm -rf build
-
-## Installation for Development
-
-If you want to test Ajax IM as a standalone app for development, you will need
-to install [`Jade`](http://github.com/visionmedia/jade) as well.
-
-To install `Jade`:
-    npm install jade
+    unzip AjaxIM_v4.0a4.zip
+    cd AjaxIM_v4.0a4
+    npm install
 
 ## Starting up the server
 
 Starting the server in _development_ mode is as simple as:
+
     node server/app.js
 
 To start the server in _production_ mode:
-    EXPRESS_ENV=production node server/app.js
 
-To start the server as a _daemon_ in _production_ mode:
-    node server/app.js start production
+    NODE_ENV=production node server/app.js
+
+To start the server using forever with a log file:
+
+    npm install forever
+    forever -l ~/ajaxim.log start ~/AjaxIM_v4.0a4/server/app.js
 
 ## Testing it out
 
@@ -67,24 +57,23 @@ through the included development testing app. The below instructions are
 assuming that you have left all default configuration options. If not, please
 replace the host/port values with the correct ones.
 
-To get started, first initialize a session cookie by going to:
-    http://localhost:8000/dev/cookie
+To get started, head over to the development page:
 
-Then head over to the development page that will initialize the client:
     http://localhost:8000/dev/
 
 That's it!
 
 ## More Information
 
-* Follow [endtwist](http://twitter.com/endtwist) on twitter for updates
+* Follow [ajaximrpg](http://twitter.com/ajaximrpg) on twitter for updates
 * [Google Group](http://groups.google.com/group/ajaxim) for discussion
 * [GitHub Wiki](https://github.com/endtwist/AjaxIM/wiki) for guidance
 
 ## Node Compatibility
 
 The `master` branch of Ajax IM is compatible with node --version:
-    v0.8.9
+
+    v0.10.32
 
 ## Contributing
 
@@ -222,7 +211,7 @@ Methods:
 
 (The MIT License)
 
-Copyright (c) 2012 [Daniel Howard] (http://www.svexpertise.com)  
+Copyright (c) 2012-2014 [Daniel Howard] (http://www.svexpertise.com)  
 Copyright (c) 2010 [Joshua Gross](http://www.unwieldy.net)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

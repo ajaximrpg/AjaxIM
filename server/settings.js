@@ -1,8 +1,7 @@
 // == Server Configuration ==
 //
 // This is the configuration file for the Node.js Ajax IM server. Here, you
-// can set which ports will be used for the public and internal servers,
-// as well as other settings such as the session cookie name and expiration.
+// can set which ports will be used for the public and internal servers.
 
 // === Host and Port ===
 //
